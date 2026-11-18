@@ -127,6 +127,21 @@ class TestBackend(unittest.TestCase):
             self.assertEqual(_pick(d, "auto"), "onnx" if has_ort else "torch")
             self.assertEqual(_pick(d, "torch"), "torch")
 
+    def test_needed_files(self):
+        from samdei_type.pipeline import _needed
+        mini = {"rerank_weights": {"char": 0.0, "word": 0.3, "oov": 1.0, "channel": 0.0},
+                "char_lm": None, "word_lm": "lm/w.json.gz", "channel_model": None}
+        self.assertEqual(_needed(mini, "onnx", True), ["onnx/encoder_kv.int8.onnx", "onnx/decoder_step.int8.onnx",
+                                                       "onnx/vocab.json", "lm/w.json.gz"])
+        base = {"rerank_weights": {"char": 0.3, "word": 0.3, "oov": 1.0, "channel": 0.3},
+                "char_lm": "lm/c.npz", "word_lm": "lm/w.json.gz", "channel_model": "channel/"}
+        self.assertEqual(_needed(base, "torch", True), ["config.json", "model.safetensors", "lm/c.npz",
+                                                        "lm/w.json.gz", "channel/config.json",
+                                                        "channel/model.safetensors"])
+        self.assertEqual(_needed(base, "torch", False), ["config.json", "model.safetensors"])
+        base["rerank_weights"]["char"] = 0.0  # a model with weight 0 is not loaded, so not downloaded
+        self.assertNotIn("lm/c.npz", _needed(base, "torch", True))
+
 
 @unittest.skipUnless(os.environ.get("SAMDEI_TYPE_MODEL"), "set SAMDEI_TYPE_MODEL to a released model")
 class TestReleasedModel(unittest.TestCase):

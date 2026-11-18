@@ -21,6 +21,10 @@ from .evaluation import chunk_source
 
 RERANK_CONFIG = "rerank.json"
 _BACKENDS = ("auto", "torch", "onnx")
+_TORCH_FILES = ("config.json", "model.safetensors")
+_ONNX_FILES = ("onnx/encoder_kv.int8.onnx", "onnx/decoder_step.int8.onnx", "onnx/vocab.json")
+# rerank.json key -> the rerank weights that use it (rerank.Reranker loads a model only if one of them is nonzero)
+_RERANK_FILES = {"char_lm": ("char",), "word_lm": ("word", "oov"), "channel_model": ("channel",)}
 
 
 def _pick(d: Path, backend: str) -> str:
@@ -40,24 +44,62 @@ def _pick(d: Path, backend: str) -> str:
     return "torch" if has_torch else "onnx"
 
 
-def _resolve(model: str | Path, backend: str, revision: str | None) -> tuple[Path, str]:
-    """(folder, backend) for a local folder, or for a Hugging Face repo id after downloading the files the
-    backend needs (the ONNX backend skips model.safetensors, the torch backend skips onnx/)."""
+def _needed(cfg: dict, backend: str, rerank: bool) -> list[str]:
+    """The files a Converter reads from a model folder besides rerank.json: the backend's weights and, with
+    rerank, the language models and the channel model that rerank.json names and gives a nonzero weight."""
+    files = list(_TORCH_FILES if backend == "torch" else _ONNX_FILES)
+    if rerank:
+        weights = cfg.get("rerank_weights", {})
+        for key, uses in _RERANK_FILES.items():
+            rel = cfg.get(key)
+            if rel and any(weights.get(u) for u in uses):
+                rel = rel.rstrip("/")
+                files += [f"{rel}/{f}" for f in _TORCH_FILES] if key == "channel_model" else [rel]
+    return files
+
+
+def _download(repo: str, revision: str | None, backend: str, rerank: bool) -> tuple[Path, str]:
+    """Fetch only the files a Converter needs, one at a time. A file that is cached and up to date is not
+    fetched again and prints nothing (snapshot_download draws its progress bars on every call)."""
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
+
+    def get(name: str, rev: str | None) -> Path | None:
+        try:
+            return Path(hf_hub_download(repo, name, revision=rev))
+        except LocalEntryNotFoundError:  # offline and not cached
+            raise
+        except EntryNotFoundError:  # not in the repo
+            return None
+
+    found = get(RERANK_CONFIG, revision)
+    rev = found.parent.name if found else revision  # the commit, so that all files come from the same one
+    torch_cfg = get("config.json", rev)  # the torch backend reads it; _pick checks for it
+    found = found or torch_cfg
+    if found is None:
+        raise ValueError(f"{repo}: no {RERANK_CONFIG} or config.json, so not a Samdei Type model")
+    d = found.parent
+    backend = _pick(d, backend)
+    cfg = json.loads((d / RERANK_CONFIG).read_text(encoding="utf-8")) if (d / RERANK_CONFIG).is_file() else {}
+    for name in _needed(cfg, backend, rerank):
+        get(name, rev)
+    return d, backend
+
+
+def _resolve(model: str | Path, backend: str, revision: str | None, rerank: bool) -> tuple[Path, str]:
+    """(folder, backend) for a local folder, or for a Hugging Face repo id after downloading the files that
+    the backend and the reranker need."""
     d = Path(model).expanduser()
     if d.is_dir():
         return d, _pick(d, backend)
     if d.exists() or str(model).startswith((".", "/", "~")):
         raise FileNotFoundError(f"{model}: not a model folder")
-    from huggingface_hub import snapshot_download
-    repo = str(model)
     try:
-        if backend == "auto":  # the small files first, to see which weights the repo has
-            small = snapshot_download(repo, revision=revision, allow_patterns=[RERANK_CONFIG, "config.json"])
-            backend = _pick(Path(small), backend)
-        ignore = ["onnx/*"] if backend == "torch" else ["model.safetensors"]
-        return Path(snapshot_download(repo, revision=revision, ignore_patterns=ignore)), backend
+        return _download(str(model), revision, backend, rerank)
+    except ValueError:
+        raise
     except Exception as e:  # not found, private, no connection, ...
-        raise OSError(f"could not download {repo} from the Hugging Face Hub ({type(e).__name__}). Check the "
+        raise OSError(f"could not download {model} from the Hugging Face Hub ({type(e).__name__}). Check the "
                       "repo id and the connection, or pass a local model folder.") from e
 
 
@@ -75,7 +117,7 @@ class Converter:
                  revision: str | None = None):
         if backend not in _BACKENDS:
             raise ValueError(f"backend must be one of {_BACKENDS}, not {backend!r}")
-        d, backend = _resolve(model, backend, revision)
+        d, backend = _resolve(model, backend, revision, rerank)
         self.dir, self.device, self.backend = d, device, backend
         cfg_path = d / RERANK_CONFIG
         self.config = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.is_file() else {}

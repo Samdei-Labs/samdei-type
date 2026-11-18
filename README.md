@@ -13,8 +13,8 @@ on first use:
 
 | Model | Parameters | Decoded as in the paper with | First download |
 |---|---|---|---|
-| [Samdei Type Mini](https://huggingface.co/samdei/samdei-type-mini) | 7.1M | int8 ONNX graphs + word LM | about 8 MB (ONNX) |
-| [Samdei Type Base](https://huggingface.co/samdei/samdei-type-base) | 18.2M | PyTorch weights + character LM, word LM and channel model | about 120 MB |
+| [Samdei Type Mini](https://huggingface.co/samdei/samdei-type-mini) | 7.1M | int8 ONNX graphs + word LM | about 9 MB |
+| [Samdei Type Base](https://huggingface.co/samdei/samdei-type-base) | 18.2M | PyTorch weights + character LM, word LM and channel model | about 125 MB |
 
 Both are character-level Transformer encoder-decoders. Mini is small enough for a phone keyboard; Base is more
 accurate. Their scores on [Samdei Type Bench](https://huggingface.co/datasets/samdei/samdei-type-bench), training
@@ -56,8 +56,9 @@ $ samdei-type --nbest "jam knhom bontech"                 # also each piece's ca
 `samdei-type --help` lists the options: `--backend torch|onnx`, `--beam`, `--no-rerank` (beam search only),
 `--no-chunk`, `--tsv`, `--device`, `--threads`. `python -m samdei_type` runs the same command.
 
-The first run downloads the model into the Hugging Face cache (`~/.cache/huggingface`). After that it works
-offline; set `HF_HUB_OFFLINE=1` to skip the check for updates. `-m` also takes a local folder:
+The first run downloads the files the model uses into the Hugging Face cache (`~/.cache/huggingface`). After
+that it only checks the Hub for updates and works offline; set `HF_HUB_OFFLINE=1` to skip the check.
+`-m` also takes a local folder:
 
 ```bash
 hf download samdei/samdei-type-mini --local-dir samdei-type-mini
