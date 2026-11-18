@@ -1,54 +1,37 @@
-"""n-best reranking: model logprob + a*charLM + b*wordLM - c*OOV + d*channel log P(src | hyp).
+"""n-best reranking. Each hypothesis y of an input x is scored as
 
-Weights come from the rerank.json of a released model (key "rerank_weights"; see load_weights).
+    log P(y|x) + char * log P_char(y) + word * log P_word(y) - oov * #OOV(y) + channel * log P_ch(x|y)
+
+with the weights of a released model's rerank.json ("rerank_weights"). P_ch is the channel model, which reads
+Khmer and predicts the romanized input.
 """
-from __future__ import annotations
-
-import json
-from pathlib import Path
-
-WEIGHT_KEYS = ("char", "word", "oov", "channel")
-
-
-def load_weights(eval_json: str | Path, key: str = "rerank_weights") -> dict[str, float]:
-    w = dict.fromkeys(WEIGHT_KEYS, 0.0)
-    p = Path(eval_json)
-    if p.exists():
-        w.update(json.loads(p.read_text()).get(key, {}))
-    return w
+from .evaluation import seq_logprob
+from .lm import CharLM, WordLM
+from .model import load
 
 
 class Reranker:
-    def __init__(self, weights: dict[str, float], charlm: str | None = None, wordlm: str | None = None,
+    def __init__(self, weights: dict[str, float], char_lm: str | None = None, word_lm: str | None = None,
                  channel: str | None = None, device: str = "cpu"):
-        self.w = dict.fromkeys(WEIGHT_KEYS, 0.0) | weights
-        self.device = device
-        self.clm = self.wlm = self.ch = None
-        if self.w["char"] and charlm and Path(charlm).exists():
-            from .lm import CharLM
-            self.clm = CharLM.load(charlm)
-        if (self.w["word"] or self.w["oov"]) and wordlm and Path(wordlm).exists():
-            from .lm import WordLM
-            self.wlm = WordLM.load(wordlm)
-        if self.w["channel"] and channel and Path(channel).exists():
-            from .model import load
-            self.ch = load(channel, device)[:3]
+        """char_lm, word_lm: LM files; channel: the channel model's folder. Each is loaded only if its weight
+        is not zero."""
+        self.w = {"char": 0.0, "word": 0.0, "oov": 0.0, "channel": 0.0} | weights
+        self.clm = CharLM.load(char_lm) if char_lm and self.w["char"] else None
+        self.wlm = WordLM.load(word_lm) if word_lm and (self.w["word"] or self.w["oov"]) else None
+        self.ch = load(channel, device) if channel and self.w["channel"] else None
 
     @property
     def active(self) -> bool:
         return bool(self.clm or self.wlm or self.ch)
 
     def rerank(self, src: str, hyps: list[tuple[str, float]]) -> list[tuple[str, float]]:
-        """hyps: [(text, model logprob)]. Returns [(text, total score)] best first."""
+        """hyps: [(text, model log probability)] for input src. Returns [(text, total score)], best first."""
         if not hyps or not self.active:
             return list(hyps)
-        if self.ch:
-            from .evaluation import seq_logprob
-            chl = seq_logprob(*self.ch, [h for h, _ in hyps], [src] * len(hyps), self.device)
-        else:
-            chl = [0.0] * len(hyps)
+        texts = [h for h, _ in hyps]
+        ch = seq_logprob(*self.ch, texts, [src] * len(hyps)) if self.ch else [0.0] * len(hyps)
         w, out = self.w, []
-        for (h, lp), c in zip(hyps, chl):
+        for (h, lp), c in zip(hyps, ch):
             cl = self.clm.logprob(h) if self.clm else 0.0
             wl, oov = self.wlm.logprob(h) if self.wlm else (0.0, 0)
             out.append((h, lp + w["char"] * cl + w["word"] * wl - w["oov"] * oov + w["channel"] * c))

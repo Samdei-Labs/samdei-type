@@ -50,24 +50,26 @@ print(conv.convert("knhom jong tov phsar"))       # ខ្ញុំចង់ទ�
 print(conv.convert_batch(["bong nham bay nov?", "ot mean wifi te"]))
 ```
 
-`Converter` reads the model folder's `rerank.json`, so it decodes as the published scores were computed. The lower-level pieces, which the model cards also show:
+`Converter` reads the model folder's `rerank.json`, so it decodes as the published scores were computed. The same steps with the lower-level pieces:
 
 ```python
+import json
 from huggingface_hub import snapshot_download
 from samdei_type.evaluation import chunk_source, translate
 from samdei_type.model import load
-from samdei_type.rerank import Reranker, load_weights
+from samdei_type.rerank import Reranker
 
 d = snapshot_download("samdei/samdei-type-base")
-model, sv, tv, _ = load(d, "cpu")                                  # config.json + model.safetensors
-rr = Reranker(load_weights(f"{d}/rerank.json"), charlm=f"{d}/lm/char5_nowiki.npz",
-              wordlm=f"{d}/lm/wordfull_nowiki.json.gz", channel=f"{d}/channel")
+model, sv, tv = load(d)                                          # config.json + model.safetensors
+weights = json.load(open(f"{d}/rerank.json"))["rerank_weights"]
+rr = Reranker(weights, char_lm=f"{d}/lm/char5_nowiki.npz", word_lm=f"{d}/lm/wordfull_nowiki.json.gz",
+              channel=f"{d}/channel")
 pieces = chunk_source("knhom jong tov phsar", 8)
-_, nbest = translate(model, sv, tv, pieces, "cpu", beam=5)
+nbest = translate(model, sv, tv, pieces, beam=5)
 print(" ".join(rr.rerank(p, hyps)[0][0] for p, hyps in zip(pieces, nbest)))
 ```
 
-With the int8 graphs: `from samdei_type.onnx_infer import OnnxConverter; OnnxConverter(f"{d}/onnx").beam(piece, k=5)`.
+For the int8 graphs, `OnnxConverter(f"{d}/onnx").beam(piece, k=5)` from `samdei_type.onnx_infer` gives a piece's n-best list. That module uses only numpy and onnxruntime.
 
 ## How decoding works
 
@@ -81,11 +83,12 @@ With the int8 graphs: `from samdei_type.onnx_infer import OnnxConverter; OnnxCon
 | Module | What it does |
 |---|---|
 | `samdei_type.pipeline` | `Converter`: a model folder or Hub repo id → `convert(text)` |
-| `samdei_type.model` | the encoder-decoder, `load` / `load_pretrained` / `save_pretrained`, KV-cached greedy and beam search |
+| `samdei_type.model` | the encoder-decoder, `load`, KV-cached greedy and beam search |
 | `samdei_type.onnx_infer` | int8 ONNX decoding with numpy and onnxruntime: the reference to port to a phone runtime |
 | `samdei_type.rerank`, `samdei_type.lm` | n-best reranking; hashed character n-gram LM and word bigram LM |
 | `samdei_type.evaluation` | input chunking, batched decoding, CER and exact match (`score`, as used for Samdei Type Bench) |
 | `samdei_type.text`, `samdei_type.khnormal` | Khmer normalization |
+| `samdei_type.vocab` | character vocabularies |
 | `samdei_type.cli` | the `samdei-type` command |
 
 Training code and the data generator are not part of this repository. The training data are on the Hub: [samdei/samdei-type-pretraining-data](https://huggingface.co/datasets/samdei/samdei-type-pretraining-data) and [samdei/samdei-type-finetuning-data](https://huggingface.co/datasets/samdei/samdei-type-finetuning-data).

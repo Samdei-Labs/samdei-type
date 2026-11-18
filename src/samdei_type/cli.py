@@ -8,8 +8,6 @@
 
 Also runs as `python -m samdei_type`.
 """
-from __future__ import annotations
-
 import argparse
 import sys
 
@@ -34,7 +32,6 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--threads", type=int, default=1, help="onnxruntime threads (onnx backend)")
     a = ap.parse_args(argv)
 
-    from .evaluation import chunk_source
     from .pipeline import Converter
 
     texts = [line.rstrip("\n") for line in sys.stdin] if a.text == ["-"] else a.text
@@ -43,21 +40,18 @@ def main(argv: list[str] | None = None) -> None:
                          threads=a.threads)
     except (FileNotFoundError, ImportError, ValueError) as e:
         sys.exit(f"samdei-type: {e}")
+    chunk = not a.no_chunk
     if not a.nbest:
-        for src, out in zip(texts, conv.convert_batch(texts, chunk=not a.no_chunk)):
+        for src, out in zip(texts, conv.convert_batch(texts, chunk)):
             print(f"{src}\t{out}" if a.tsv else out)
         return
     for src in texts:
-        pieces = [] if not src.strip() else chunk_source(src, conv.max_words) if not a.no_chunk else [src.strip()]
-        lists = conv.nbest(pieces) if pieces else []
-        out = " ".join(h[0][0] if h else "" for h in lists)
+        pieces = conv.pieces(src, chunk)
+        lists = conv.nbest(pieces)
+        out = " ".join(hyps[0][0] if hyps else "" for hyps in lists)
         print(f"{src}\t{out}" if a.tsv else out)
         for piece, hyps in zip(pieces, lists):
             if len(pieces) > 1:
                 print(f"  [{piece}]")
             for h, sc in hyps:
                 print(f"    {sc:8.2f}  {h}")
-
-
-if __name__ == "__main__":
-    main()

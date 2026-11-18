@@ -1,19 +1,17 @@
-"""Convert romanized Khmer with a released model folder, decoded as in the paper.
+"""Convert romanized Khmer with a released model, decoded as in the paper.
 
     from samdei_type.pipeline import Converter
     conv = Converter("samdei/samdei-type-mini")      # a Hugging Face repo id or a local folder
     conv.convert("knhom jong tov phsar")             # 'ខ្ញុំចង់ទៅផ្សារ'
 
-A released model folder holds `rerank.json` (beam size, piece length, rerank weights and the paths of the
-language models and the channel model), the PyTorch weights (`config.json` + `model.safetensors`) and/or the
-int8 ONNX graphs (`onnx/`), and the files that rerank.json names (`lm/`, `channel/`).
+A released model folder holds the PyTorch weights (config.json, model.safetensors), the int8 ONNX graphs
+(onnx/), and rerank.json: the beam size, the piece length, the rerank weights and the paths of the language
+models (lm/) and the channel model (channel/).
 
-Decoding: the input is cut into pieces of at most 8 words, breaking after punctuation (evaluation.chunk_source);
-each piece gets a beam search (k = 5) and its n-best list is reranked (rerank.Reranker); the best outputs are
-joined with a space.
+The input is cut into pieces of at most 8 words, breaking after punctuation (evaluation.chunk_source). Each
+piece gets a beam search with k = 5, its n-best list is reranked (rerank.Reranker), and the best outputs of
+the pieces are joined with a space.
 """
-from __future__ import annotations
-
 import json
 import warnings
 from pathlib import Path
@@ -30,9 +28,9 @@ def _pick(d: Path, backend: str) -> str:
     return backend
 
 
-def _resolve(model: str | Path, backend: str, revision: str | None = None) -> tuple[Path, str]:
-    """(folder, backend) for a local folder, or for a Hugging Face repo id after downloading what the backend
-    needs: the ONNX backend skips the root PyTorch weights, the torch backend skips onnx/."""
+def _resolve(model: str | Path, backend: str, revision: str | None) -> tuple[Path, str]:
+    """(folder, backend) for a local folder, or for a Hugging Face repo id after downloading the files the
+    backend needs (the ONNX backend skips model.safetensors, the torch backend skips onnx/)."""
     d = Path(model).expanduser()
     if d.is_dir():
         return d, _pick(d, backend)
@@ -40,7 +38,7 @@ def _resolve(model: str | Path, backend: str, revision: str | None = None) -> tu
         raise FileNotFoundError(f"{model}: not a model folder")
     from huggingface_hub import snapshot_download
     repo = str(model)
-    if backend == "auto":  # small files first, to see which weights the repo has
+    if backend == "auto":  # the small files first, to see which weights the repo has
         backend = _pick(Path(snapshot_download(repo, revision=revision, allow_patterns=[RERANK_CONFIG, "config.json"])),
                         backend)
     ignore = ["onnx/*"] if backend == "torch" else ["model.safetensors"]
@@ -48,11 +46,12 @@ def _resolve(model: str | Path, backend: str, revision: str | None = None) -> tu
 
 
 class Converter:
-    """Romanized Khmer -> Khmer script with a released model (local folder or Hugging Face repo id).
+    """Romanized Khmer -> Khmer script with a released model (a local folder or a Hugging Face repo id).
 
-    backend: "torch" (config.json + model.safetensors), "onnx" (onnx/ int8 graphs, onnxruntime) or "auto"
-    (torch when the folder has PyTorch weights, else onnx). rerank: use the language models and channel model
-    named in rerank.json (the setting of the published scores). beam / max_words: override rerank.json.
+    backend: "torch" (config.json + model.safetensors), "onnx" (the int8 graphs in onnx/, needs onnxruntime)
+    or "auto" (torch if the folder has PyTorch weights, else onnx). rerank: rerank with the language models
+    and the channel model named in rerank.json, as for the published scores. beam, max_words: override
+    rerank.json.
     """
 
     def __init__(self, model: str | Path, backend: str = "auto", device: str = "cpu", rerank: bool = True,
@@ -66,63 +65,65 @@ class Converter:
         self.config = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.is_file() else {}
         self.beam = beam or self.config.get("beam", 5)
         self.max_words = max_words or self.config.get("chunk_max_words", 8)
+        self.onnx = None
         if backend == "torch":
             from .model import load
-            self.model, self.sv, self.tv, _ = load(str(d), device)
-            self.onnx = None
+            self.model, self.sv, self.tv = load(d, device)
         else:
             if not (d / "onnx").is_dir():
                 raise FileNotFoundError(f"{d}: no onnx/ folder (and no config.json for the torch backend)")
             try:
-                import onnxruntime  # noqa: F401
+                from .onnx_infer import OnnxConverter
             except ImportError as e:
                 raise ImportError("the onnx backend needs onnxruntime: pip install 'samdei-type[deploy]'") from e
-            from .onnx_infer import OnnxConverter
             self.onnx = OnnxConverter(str(d / "onnx"), threads=threads)
         self.reranker = self._reranker() if rerank else None
 
     def _reranker(self):
-        from .rerank import Reranker, load_weights
+        from .rerank import Reranker
         if not self.config:
             warnings.warn(f"{self.dir}: no {RERANK_CONFIG}; decoding without reranking")
             return None
-        weights = load_weights(self.dir / RERANK_CONFIG)
         paths = {}
-        for key, weight_keys in (("char_lm", ("char",)), ("word_lm", ("word", "oov")), ("channel_model", ("channel",))):
+        for key in ("char_lm", "word_lm", "channel_model"):
             rel = self.config.get(key)
-            if not rel or not any(weights.get(k) for k in weight_keys):
+            if not rel:
                 continue
             p = self.dir / rel
-            if not p.exists():
+            if p.exists():
+                paths[key] = str(p)
+            else:
                 warnings.warn(f"{p} (named in {RERANK_CONFIG}) is missing; its rerank term is skipped")
-                continue
-            paths[key] = str(p)
-        rr = Reranker(weights, paths.get("char_lm"), paths.get("word_lm"), paths.get("channel_model"), self.device)
+        rr = Reranker(self.config.get("rerank_weights", {}), paths.get("char_lm"), paths.get("word_lm"),
+                      paths.get("channel_model"), self.device)
         return rr if rr.active else None
 
+    def pieces(self, text: str, chunk: bool = True) -> list[str]:
+        """The pieces text is decoded in: chunk_source pieces, or the whole text if chunk is False."""
+        if not text.strip():
+            return []
+        return chunk_source(text, self.max_words) if chunk else [text.strip()]
+
     def nbest(self, pieces: list[str]) -> list[list[tuple[str, float]]]:
-        """Per piece: [(khmer, score)] best first; scores are reranked totals when reranking is on."""
+        """Per piece: [(khmer, score)], best first; with reranking, the scores are the reranked totals."""
         if self.onnx is not None:
             lists = [self.onnx.beam(p, k=self.beam) for p in pieces]
         else:
             from .evaluation import translate
-            _, lists = translate(self.model, self.sv, self.tv, pieces, self.device, beam=self.beam)
+            lists = translate(self.model, self.sv, self.tv, pieces, beam=self.beam)
         if self.reranker is not None:
             lists = [self.reranker.rerank(p, hyps) for p, hyps in zip(pieces, lists)]
         return lists
 
     def convert_batch(self, texts: list[str], chunk: bool = True) -> list[str]:
-        """Convert several messages; all their pieces are decoded together (batched on the torch backend)."""
-        pieces, owner = [], []
-        for i, t in enumerate(texts):
-            if not t.strip():
-                continue
-            for p in (chunk_source(t, self.max_words) if chunk else [t.strip()]):
-                pieces.append(p); owner.append(i)
-        outs: list[list[str]] = [[] for _ in texts]
-        for i, hyps in zip(owner, self.nbest(pieces) if pieces else []):
-            outs[i].append(hyps[0][0] if hyps else "")
-        return [" ".join(o) for o in outs]
+        """Convert several messages. Their pieces are decoded together (batched on the torch backend)."""
+        per_text = [self.pieces(t, chunk) for t in texts]
+        best = [hyps[0][0] if hyps else "" for hyps in self.nbest([p for ps in per_text for p in ps])]
+        out, i = [], 0
+        for ps in per_text:
+            out.append(" ".join(best[i:i + len(ps)]))
+            i += len(ps)
+        return out
 
     def convert(self, text: str, chunk: bool = True) -> str:
         return self.convert_batch([text], chunk)[0]
