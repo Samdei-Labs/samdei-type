@@ -20,7 +20,7 @@ Both are character-level Transformer encoder-decoders. Mini is small enough for 
 accurate. Their scores on [Samdei Type Bench](https://huggingface.co/datasets/samdei/samdei-type-bench), training
 data and limitations are in the model cards. All releases: the
 [Samdei Type collection](https://huggingface.co/collections/samdei/samdei-type-romanized-khmer-khmer-script).
-Paper: [technical report (PDF)](paper/samdei-type.pdf).
+Paper: [technical report (PDF)](https://github.com/Samdei-Labs/samdei-type/blob/main/paper/samdei-type.pdf).
 
 Samdei (សំដី, "what you say") is our team, Samdei Labs.
 
@@ -154,7 +154,7 @@ under the MIT License. The models and datasets on the Hub have their own license
 
 ## Citation
 
-The technical report is [paper/samdei-type.pdf](paper/samdei-type.pdf).
+The technical report is [paper/samdei-type.pdf](https://github.com/Samdei-Labs/samdei-type/blob/main/paper/samdei-type.pdf).
 
 ```bibtex
 @misc{samdei-type-2026,
