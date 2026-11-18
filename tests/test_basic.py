@@ -111,6 +111,23 @@ class TestLM(unittest.TestCase):
         self.assertGreaterEqual(lm.logprob("សាលារៀន")[1], 1)
 
 
+class TestBackend(unittest.TestCase):
+    def test_auto_follows_rerank_json(self):
+        import importlib.util
+        import warnings
+        from samdei_type.pipeline import _pick
+        has_ort = importlib.util.find_spec("onnxruntime") is not None
+        with tempfile.TemporaryDirectory() as d, warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            d = Path(d)
+            self.assertEqual(_pick(d, "auto"), "onnx")                     # no PyTorch weights
+            (d / "config.json").write_text("{}")
+            self.assertEqual(_pick(d, "auto"), "torch")                    # no rerank.json: PyTorch weights
+            (d / "rerank.json").write_text('{"backend": "onnx"}')
+            self.assertEqual(_pick(d, "auto"), "onnx" if has_ort else "torch")
+            self.assertEqual(_pick(d, "torch"), "torch")
+
+
 @unittest.skipUnless(os.environ.get("SAMDEI_TYPE_MODEL"), "set SAMDEI_TYPE_MODEL to a released model")
 class TestReleasedModel(unittest.TestCase):
     def test_convert(self):

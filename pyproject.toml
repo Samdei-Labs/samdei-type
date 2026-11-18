@@ -3,7 +3,7 @@ name = "samdei-type"
 version = "0.1.0"
 description = "Samdei Type: convert romanized Khmer (Latin chat spelling) to Khmer script"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "The Samdei Type Authors" }]
 keywords = ["khmer", "romanization", "transliteration", "seq2seq", "nlp"]
@@ -13,8 +13,11 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Text Processing :: Linguistic",
 ]
@@ -40,6 +43,7 @@ Issues = "https://github.com/Samdei-Labs/samdei-type/issues"
 "Samdei Type Mini" = "https://huggingface.co/samdei/samdei-type-mini"
 "Samdei Type Base" = "https://huggingface.co/samdei/samdei-type-base"
 "Samdei Type Bench" = "https://huggingface.co/datasets/samdei/samdei-type-bench"
+"Collection" = "https://huggingface.co/collections/samdei/samdei-type-romanized-khmer-khmer-script"
 
 [build-system]
 requires = ["hatchling"]

@@ -5,13 +5,14 @@
     conv.convert("knhom jong tov phsar")             # 'ខ្ញុំចង់ទៅផ្សារ'
 
 A released model folder holds the PyTorch weights (config.json, model.safetensors), the int8 ONNX graphs
-(onnx/), and rerank.json: the beam size, the piece length, the rerank weights and the paths of the language
-models (lm/) and the channel model (channel/).
+(onnx/), and rerank.json: the backend, beam size, piece length and rerank weights of the published scores, and
+the paths of the language models (lm/) and the channel model (channel/).
 
 The input is cut into pieces of at most 8 words, breaking after punctuation (evaluation.chunk_source). Each
 piece gets a beam search with k = 5, its n-best list is reranked (rerank.Reranker), and the best outputs of
 the pieces are joined with a space.
 """
+import importlib.util
 import json
 import warnings
 from pathlib import Path
@@ -23,9 +24,20 @@ _BACKENDS = ("auto", "torch", "onnx")
 
 
 def _pick(d: Path, backend: str) -> str:
-    if backend == "auto":
-        return "torch" if (d / "config.json").is_file() else "onnx"
-    return backend
+    """auto: the backend rerank.json names (the one the published scores used), else torch if the folder has
+    PyTorch weights, else onnx. ONNX falls back to torch when onnxruntime is not installed."""
+    if backend != "auto":
+        return backend
+    cfg = d / RERANK_CONFIG
+    named = json.loads(cfg.read_text(encoding="utf-8")).get("backend") if cfg.is_file() else None
+    has_torch = (d / "config.json").is_file()
+    if named == "onnx" and has_torch and importlib.util.find_spec("onnxruntime") is None:
+        warnings.warn("onnxruntime is not installed, so the PyTorch weights are used; for the int8 graphs "
+                      "the published scores used: pip install 'samdei-type[deploy]'")
+        return "torch"
+    if named in ("torch", "onnx"):
+        return named
+    return "torch" if has_torch else "onnx"
 
 
 def _resolve(model: str | Path, backend: str, revision: str | None) -> tuple[Path, str]:
@@ -38,18 +50,22 @@ def _resolve(model: str | Path, backend: str, revision: str | None) -> tuple[Pat
         raise FileNotFoundError(f"{model}: not a model folder")
     from huggingface_hub import snapshot_download
     repo = str(model)
-    if backend == "auto":  # the small files first, to see which weights the repo has
-        backend = _pick(Path(snapshot_download(repo, revision=revision, allow_patterns=[RERANK_CONFIG, "config.json"])),
-                        backend)
-    ignore = ["onnx/*"] if backend == "torch" else ["model.safetensors"]
-    return Path(snapshot_download(repo, revision=revision, ignore_patterns=ignore)), backend
+    try:
+        if backend == "auto":  # the small files first, to see which weights the repo has
+            small = snapshot_download(repo, revision=revision, allow_patterns=[RERANK_CONFIG, "config.json"])
+            backend = _pick(Path(small), backend)
+        ignore = ["onnx/*"] if backend == "torch" else ["model.safetensors"]
+        return Path(snapshot_download(repo, revision=revision, ignore_patterns=ignore)), backend
+    except Exception as e:  # not found, private, no connection, ...
+        raise OSError(f"could not download {repo} from the Hugging Face Hub ({type(e).__name__}). Check the "
+                      "repo id and the connection, or pass a local model folder.") from e
 
 
 class Converter:
     """Romanized Khmer -> Khmer script with a released model (a local folder or a Hugging Face repo id).
 
     backend: "torch" (config.json + model.safetensors), "onnx" (the int8 graphs in onnx/, needs onnxruntime)
-    or "auto" (torch if the folder has PyTorch weights, else onnx). rerank: rerank with the language models
+    or "auto" (the backend named in rerank.json: onnx for Mini, torch for Base). rerank: rerank with the language models
     and the channel model named in rerank.json, as for the published scores. beam, max_words: override
     rerank.json.
     """

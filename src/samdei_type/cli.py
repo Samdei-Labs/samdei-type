@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> None:
                     help=f"local model folder or Hugging Face repo id (default: {DEFAULT_MODEL})")
     ap.add_argument("--backend", choices=["auto", "torch", "onnx"], default="auto",
                     help="torch: config.json + model.safetensors; onnx: onnx/ int8 graphs (needs onnxruntime); "
-                         "auto: torch if the folder has PyTorch weights, else onnx")
+                         "auto: as in rerank.json (Mini: onnx, Base: torch)")
     ap.add_argument("--beam", type=int, default=None, help="beam size (default: rerank.json, else 5)")
     ap.add_argument("--no-rerank", action="store_true", help="skip the LM / channel reranking")
     ap.add_argument("--no-chunk", action="store_true", help="decode each message whole, not in 8-word pieces")
@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         conv = Converter(a.model, backend=a.backend, device=a.device, rerank=not a.no_rerank, beam=a.beam,
                          threads=a.threads)
-    except (FileNotFoundError, ImportError, ValueError) as e:
+    except (OSError, ImportError, ValueError) as e:
         sys.exit(f"samdei-type: {e}")
     chunk = not a.no_chunk
     if not a.nbest:
