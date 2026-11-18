@@ -1,0 +1,12 @@
+Samdei Type
+Copyright 2026 The Samdei Type Authors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes src/samdei_type/khnormal.py, vendored from
+https://github.com/sillsdev/khmer-character-specification (python/scripts/khnormal),
+Copyright (c) 2021-2024, SIL Global, licensed under the MIT License
+(https://opensource.org/licenses/MIT), unmodified except for the removal of its command line.
+
+The model weights, language models and data are not part of this repository. They are published
+on the Hugging Face Hub under their own licenses (see each model or dataset card).

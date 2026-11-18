@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Model files and downloads: they live on the Hugging Face Hub, never in this repository
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.pkl
+*.safetensors
+*.onnx
+*.npz
+*.json.gz
+samdei-type-*/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
