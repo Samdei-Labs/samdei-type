@@ -21,6 +21,7 @@ accurate. Their scores on [Samdei Type Bench](https://huggingface.co/datasets/sa
 data and limitations are in the model cards. All releases: the
 [Samdei Type collection](https://huggingface.co/collections/samdei/samdei-type-romanized-khmer-khmer-script).
 Paper: [technical report (PDF)](https://github.com/Samdei-Labs/samdei-type/blob/main/paper/samdei-type.pdf).
+Release article: [Samdei Type: open models that turn romanized Khmer into Khmer script](https://huggingface.co/blog/mengsay/samdei-type).
 
 Samdei (សំដី, "what you say") is our team, Samdei Labs.
 
