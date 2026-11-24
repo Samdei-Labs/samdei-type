@@ -39,6 +39,10 @@ Without it, Mini falls back to its PyTorch weights. PyTorch is needed either way
 takes about 1 GB. On Linux, pip installs PyTorch with its CUDA libraries, several GB; for a CPU-only install, add
 PyTorch's CPU build first: `pip install torch --index-url https://download.pytorch.org/whl/cpu`.
 
+Some onnxruntime builds send usage telemetry to Microsoft by default. The package turns it off by setting
+`ORT_DISABLE_TELEMETRY=1` (unless you set it yourself). onnxruntime reads the variable when it is imported, so if
+your code imports onnxruntime before the converter loads, set the variable yourself first.
+
 The latest code from GitHub: `pip install "samdei-type[deploy] @ git+https://github.com/Samdei-Labs/samdei-type.git"`.
 
 ## Command line

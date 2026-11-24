@@ -7,12 +7,19 @@ cross-attention keys and values; decoder_step decodes one token for all beams, w
     conv.beam("knhom jong tov phsar", k=5)     # [(khmer, log probability), ...], best first
 """
 import json
+import os
 from pathlib import Path
 
-import numpy as np
-import onnxruntime as ort
+# Some onnxruntime builds (the macOS wheels, at least) start Microsoft's 1DS telemetry with the first session: an
+# event store under ~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime and uploads to
+# mobile.events.data.microsoft.com. Off unless the caller set the variable. onnxruntime reads it when it is
+# imported, so this must come before the import.
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 
-from .vocab import BOS, EOS, MAX_INPUT_CHARS, Vocab
+import numpy as np  # noqa: E402
+import onnxruntime as ort  # noqa: E402
+
+from .vocab import BOS, EOS, MAX_INPUT_CHARS, Vocab  # noqa: E402
 
 
 class OnnxConverter:

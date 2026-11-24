@@ -3,8 +3,11 @@
 Set SAMDEI_TYPE_MODEL to a released model folder (or Hub repo id) to also run the end-to-end test.
 """
 import gzip
+import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -147,6 +150,23 @@ class TestBackend(unittest.TestCase):
             (d / "rerank.json").write_text('{"backend": "onnx"}')
             self.assertEqual(_pick(d, "auto"), "onnx" if has_ort else "torch")
             self.assertEqual(_pick(d, "torch"), "torch")
+
+    @unittest.skipUnless(importlib.util.find_spec("onnxruntime") is not None, "onnxruntime not installed")
+    def test_onnx_telemetry_off(self):
+        # onnxruntime reads ORT_DISABLE_TELEMETRY when it is imported: record its value at that moment
+        code = (
+            "import os, sys\n"
+            "os.environ.pop('ORT_DISABLE_TELEMETRY', None)\n"
+            "seen = []\n"
+            "class Hook:\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name == 'onnxruntime':\n"
+            "            seen.append(os.environ.get('ORT_DISABLE_TELEMETRY'))\n"
+            "sys.meta_path.insert(0, Hook())\n"
+            "import samdei_type.onnx_infer\n"
+            "print(seen[0])\n")
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertEqual(out.stdout.strip(), "1", out.stderr)
 
     def test_needed_files(self):
         from samdei_type.pipeline import _needed
