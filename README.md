@@ -13,8 +13,8 @@ on first use:
 
 | Model | Parameters | Decoded as in the paper with | First download |
 |---|---|---|---|
-| [Samdei Type Mini](https://huggingface.co/samdei/samdei-type-mini) | 7.1M | int8 ONNX graphs + word LM | about 9 MB |
-| [Samdei Type Base](https://huggingface.co/samdei/samdei-type-base) | 18.2M | PyTorch weights + character LM, word LM and channel model | about 125 MB |
+| [Samdei Type Mini](https://huggingface.co/samdei/samdei-type-mini) | 7.2M | int8 ONNX graphs + word LM | about 9 MB |
+| [Samdei Type Base](https://huggingface.co/samdei/samdei-type-base) | 18.2M | PyTorch weights + character LM, word LM and the model itself as channel model | about 97 MB |
 
 Both are character-level Transformer encoder-decoders. Mini is small enough for a phone keyboard; Base is more
 accurate. Their scores on [Samdei Type Bench](https://huggingface.co/datasets/samdei/samdei-type-bench), training
@@ -24,6 +24,9 @@ Paper: [technical report (PDF)](https://github.com/Samdei-Labs/samdei-type/blob/
 Release article: [Samdei Type: open models that turn romanized Khmer into Khmer script](https://huggingface.co/blog/mengsay/samdei-type).
 
 Samdei (សំដី, "what you say") is our team, Samdei Labs.
+
+**1.0 (2026-11-24)** runs the v1 models (Samdei Type Bench CER: Mini 0.049, Base 0.040). The v0.1 models are at
+revision `v0.1` of each repo: `Converter("samdei/samdei-type-base", revision="v0.1")`.
 
 ## Install
 
@@ -75,6 +78,7 @@ conv = Converter("samdei/samdei-type-base")              # a Hub repo id or a lo
 conv.convert("knhom jong tov phsar")                     # 'ខ្ញុំចង់ទៅផ្សារ'
 conv.convert_batch(["bong nham bay nov?", "ot mean wifi te"])
                                                          # ['បងញ៉ាំបាយនៅ?', 'អត់មាន wifi ទេ']
+conv.convert("ខ្ញុំចង់ទៅផ្សារ", reverse=True)             # 'knhom chong tov phsar'
 mini = Converter("samdei/samdei-type-mini")              # int8 ONNX graphs, as rerank.json says
 mini.nbest(mini.pieces("jam knhom bontech"))             # [[('ចាំខ្ញុំបន្តិច', -8.16), ...]]
 ```
@@ -89,15 +93,16 @@ from huggingface_hub import snapshot_download
 from samdei_type.evaluation import chunk_source, translate
 from samdei_type.model import load
 from samdei_type.rerank import Reranker
+from samdei_type.text import drop_commas
 
 d = snapshot_download("samdei/samdei-type-base")
 model, sv, tv = load(d)                                  # config.json + model.safetensors
 weights = json.load(open(f"{d}/rerank.json"))["rerank_weights"]
 rr = Reranker(weights, char_lm=f"{d}/lm/char5_nowiki.npz", word_lm=f"{d}/lm/wordfull_nowiki.json.gz",
-              channel=f"{d}/channel")
+              channel=(model, sv, tv))                   # rerank.json "channel_self": the model itself
 pieces = chunk_source("knhom jong tov phsar", 8)
 nbest = translate(model, sv, tv, pieces, beam=5)
-print(" ".join(rr.rerank(p, hyps)[0][0] for p, hyps in zip(pieces, nbest)))
+print(drop_commas(" ".join(rr.rerank(p, hyps)[0][0] for p, hyps in zip(pieces, nbest))))
 ```
 
 For the int8 graphs, `OnnxConverter(f"{d}/onnx").beam(piece, k=5)` from `samdei_type.onnx_infer` gives a piece's
@@ -111,8 +116,10 @@ n-best list. That module uses only numpy and onnxruntime, and is the reference t
    longer than 249 characters is cut.
 3. Each hypothesis y of input x is scored as `log P(y|x) + a·log P_char(y) + b·log P_word(y) − c·#OOV(y) + d·log P_ch(x|y)`
    (`samdei_type.rerank`). The channel model P_ch reads Khmer and predicts the romanized input, so it checks that a
-   hypothesis explains all of the input. The weights a–d come from the model's `rerank.json`.
-4. The best hypotheses of the pieces are joined with a space.
+   hypothesis explains all of the input. Since v1, Base is its own channel model (`"channel_self"` in
+   `rerank.json`). The weights a–d come from the model's `rerank.json`.
+4. The best hypotheses of the pieces are joined with a space, and a comma that is not between two digits becomes a
+   space, as in Khmer writing (`samdei_type.text.drop_commas`).
 
 ## Limitations
 

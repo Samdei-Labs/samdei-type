@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from safetensors.torch import load_file
 
-from .vocab import BOS, EOS, PAD, SPECIALS, Vocab
+from .vocab import BOS, EOS, PAD, REV_TAG, SPECIALS, TaggedVocab, Vocab
 
 
 @dataclass
@@ -129,6 +129,17 @@ def load(folder: str | Path, device: str = "cpu") -> tuple[Seq2Seq, Vocab, Vocab
     model = Seq2Seq(mc)
     model.load_state_dict(_from_hf_state(mc, load_file(str(d / "model.safetensors"))))
     return model.to(device).eval(), sv, tv
+
+
+def two_way(sv: Vocab) -> bool:
+    """Whether a model with source vocabulary sv also converts Khmer -> Latin (inputs that start with REV_TAG)."""
+    return REV_TAG in sv.stoi
+
+
+def channel_view(model: Seq2Seq, sv: Vocab, tv: Vocab) -> tuple[Seq2Seq, Vocab, Vocab]:
+    """(model, sv, tv) to score log P(romanized | Khmer) with: a two-way model reads its Khmer input after
+    REV_TAG; a channel model (Khmer -> Latin only) is used as it is."""
+    return model, (TaggedVocab(sv) if two_way(sv) else sv), tv
 
 
 # KV-cached decoding: the forward pass of the pre-LN nn.TransformerDecoderLayer, written out with the same

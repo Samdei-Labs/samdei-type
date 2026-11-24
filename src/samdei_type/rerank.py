@@ -3,22 +3,24 @@
     log P(y|x) + char * log P_char(y) + word * log P_word(y) - oov * #OOV(y) + channel * log P_ch(x|y)
 
 with the weights of a released model's rerank.json ("rerank_weights"). P_ch is the channel model, which reads
-Khmer and predicts the romanized input.
+Khmer and predicts the romanized input: a separate model, or a two-way model's own Khmer -> Latin direction.
 """
 from .evaluation import seq_logprob
 from .lm import CharLM, WordLM
-from .model import load
+from .model import channel_view, load
 
 
 class Reranker:
     def __init__(self, weights: dict[str, float], char_lm: str | None = None, word_lm: str | None = None,
-                 channel: str | None = None, device: str = "cpu"):
-        """char_lm, word_lm: LM files; channel: the channel model's folder. Each is loaded only if its weight
-        is not zero."""
+                 channel=None, device: str = "cpu"):
+        """char_lm, word_lm: LM files; channel: the channel model's folder, or a loaded (model, source vocab,
+        target vocab). Each is loaded only if its weight is not zero."""
         self.w = {"char": 0.0, "word": 0.0, "oov": 0.0, "channel": 0.0} | weights
         self.clm = CharLM.load(char_lm) if char_lm and self.w["char"] else None
         self.wlm = WordLM.load(word_lm) if word_lm and (self.w["word"] or self.w["oov"]) else None
-        self.ch = load(channel, device) if channel and self.w["channel"] else None
+        self.ch = None
+        if channel is not None and self.w["channel"]:
+            self.ch = channel_view(*(channel if isinstance(channel, tuple) else load(channel, device)))
 
     @property
     def active(self) -> bool:

@@ -1,6 +1,6 @@
 [project]
 name = "samdei-type"
-version = "0.1.1"
+version = "1.0.0"
 description = "Samdei Type: convert romanized Khmer (Latin chat spelling) to Khmer script"
 readme = "README.md"
 requires-python = ">=3.10"

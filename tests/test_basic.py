@@ -13,11 +13,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from samdei_type.evaluation import canon, chunk_source, score
+from samdei_type.evaluation import canon, chunk_khmer, chunk_source, score
 from samdei_type.lm import BOS_CH, EOS_CH, CharLM, WordLM
-from samdei_type.model import ModelConfig, Seq2Seq, beam_cached, greedy_cached
-from samdei_type.text import normalize_khmer
-from samdei_type.vocab import BOS, EOS, Vocab
+from samdei_type.model import ModelConfig, Seq2Seq, beam_cached, channel_view, greedy_cached, two_way
+from samdei_type.text import drop_commas, normalize_khmer
+from samdei_type.vocab import BOS, EOS, REV_TAG, TaggedVocab, Vocab
 
 
 class TestText(unittest.TestCase):
@@ -40,6 +40,18 @@ class TestText(unittest.TestCase):
         self.assertEqual(normalize_khmer("១២៣"), "123")
         self.assertEqual(normalize_khmer("សួស្ដី\u200bបង"), normalize_khmer("សួស្ដីបង"))  # zero-width space removed
 
+    def test_drop_commas(self):
+        self.assertEqual(drop_commas("បើបងយល់ព្រម, ខ្ញុំទៅ"), "បើបងយល់ព្រម ខ្ញុំទៅ")
+        self.assertEqual(drop_commas("ថ្លៃ 5,000 រៀល, ណា"), "ថ្លៃ 5,000 រៀល ណា")   # a comma between digits stays
+        self.assertEqual(drop_commas("a ,b,,c,"), "a b c")
+
+    def test_chunk_khmer(self):
+        text = "ខ្ញុំចង់ទៅផ្សារ ហើយបងទៅណា"
+        pieces = chunk_khmer(text, 2)
+        self.assertGreater(len(pieces), 1)
+        self.assertEqual("".join(pieces).replace(" ", ""), text.replace(" ", ""))
+        self.assertEqual(chunk_khmer(text, 100), [text])
+
 
 class TestModel(unittest.TestCase):
     def setUp(self):
@@ -53,6 +65,15 @@ class TestModel(unittest.TestCase):
 
     def test_vocab_roundtrip(self):
         self.assertEqual(self.sv.decode(self.sv.encode("knhom")), "knhom")
+
+    def test_two_way_vocab(self):
+        self.assertFalse(two_way(self.sv))
+        self.assertIs(channel_view(self.model, self.sv, self.tv)[1], self.sv)   # a channel model is used as it is
+        sv2 = Vocab(self.sv.itos[4:] + [REV_TAG])
+        self.assertTrue(two_way(sv2))
+        tagged = channel_view(self.model, sv2, self.tv)[1]
+        self.assertIsInstance(tagged, TaggedVocab)
+        self.assertEqual(tagged.encode("ab"), sv2.encode(REV_TAG + "ab"))
 
     @torch.no_grad()
     def test_greedy_matches_full_decoder(self):
@@ -141,6 +162,10 @@ class TestBackend(unittest.TestCase):
         self.assertEqual(_needed(base, "torch", False), ["config.json", "model.safetensors"])
         base["rerank_weights"]["char"] = 0.0  # a model with weight 0 is not loaded, so not downloaded
         self.assertNotIn("lm/c.npz", _needed(base, "torch", True))
+        v1 = {"rerank_weights": {"char": 0.2, "word": 0.3, "oov": 0.0, "channel": 0.5},
+              "char_lm": "lm/c.npz", "word_lm": "lm/w.json.gz", "channel_model": None, "channel_self": True}
+        self.assertEqual(_needed(v1, "torch", True), ["config.json", "model.safetensors", "lm/c.npz", "lm/w.json.gz"])
+        self.assertEqual(_needed(v1, "onnx", True)[-2:], ["config.json", "model.safetensors"])  # the channel's weights
 
 
 @unittest.skipUnless(os.environ.get("SAMDEI_TYPE_MODEL"), "set SAMDEI_TYPE_MODEL to a released model")
@@ -149,6 +174,7 @@ class TestReleasedModel(unittest.TestCase):
         from samdei_type.pipeline import Converter
         conv = Converter(os.environ["SAMDEI_TYPE_MODEL"])
         self.assertEqual(canon(conv.convert("knhom jong tov phsar")), canon("ខ្ញុំចង់ទៅផ្សារ"))
+        self.assertNotIn(",", conv.convert("ot mean wifi te, bong"))
 
 
 if __name__ == "__main__":

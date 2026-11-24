@@ -55,6 +55,20 @@ def chunk_source(s: str, max_words: int = 8) -> list[str]:
     return out or [s]
 
 
+def chunk_khmer(s: str, max_words: int = 8) -> list[str]:
+    """Khmer text in pieces of at most max_words khmercut words (spaces and punctuation stay with their piece)."""
+    from khmercut import tokenize
+    pieces, cur, words = [], [], 0
+    for t in tokenize(s):
+        if t.strip() and words >= max_words:
+            pieces.append("".join(cur).strip())
+            cur, words = [], 0
+        cur.append(t)
+        words += bool(t.strip())
+    pieces.append("".join(cur).strip())
+    return [p for p in pieces if p] or [s]
+
+
 def _pad(rows: list[list[int]], device) -> torch.Tensor:
     t = torch.full((len(rows), max(len(r) for r in rows)), PAD, dtype=torch.long)
     for i, r in enumerate(rows):

@@ -3,6 +3,7 @@
 PAD, BOS, EOS, UNK = 0, 1, 2, 3
 SPECIALS = ["<pad>", "<s>", "</s>", "<unk>"]
 MAX_INPUT_CHARS = 249  # longer inputs are cut; with </s>, 250 encoder positions
+REV_TAG = "\ue000"  # first input character of Khmer -> Latin, in the source vocabulary of a two-way model
 
 
 class Vocab:
@@ -27,3 +28,13 @@ class Vocab:
             if i >= len(SPECIALS):
                 out.append(self.itos[i])
         return "".join(out)
+
+
+class TaggedVocab(Vocab):
+    """A two-way model's source vocabulary for its Khmer -> Latin direction: every input starts with REV_TAG."""
+
+    def __init__(self, v: Vocab):
+        self.itos, self.stoi = v.itos, v.stoi
+
+    def encode(self, s: str) -> list[int]:
+        return super().encode(REV_TAG + s[:MAX_INPUT_CHARS - 1])

@@ -30,9 +30,11 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--tsv", action="store_true", help="print 'input<TAB>output' lines")
     ap.add_argument("--device", default="cpu", help="torch device for the torch backend and the channel model")
     ap.add_argument("--threads", type=int, default=1, help="onnxruntime threads (onnx backend)")
+    ap.add_argument("--reverse", action="store_true", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
 
     from .pipeline import Converter
+    from .text import drop_commas
 
     texts = [line.rstrip("\n") for line in sys.stdin] if a.text == ["-"] else a.text
     try:
@@ -41,14 +43,18 @@ def main(argv: list[str] | None = None) -> None:
     except (OSError, ImportError, ValueError) as e:
         sys.exit(f"samdei-type: {e}")
     chunk = not a.no_chunk
-    if not a.nbest:
-        for src, out in zip(texts, conv.convert_batch(texts, chunk)):
+    if not a.nbest or a.reverse:
+        try:
+            outs = conv.convert_batch(texts, chunk, reverse=a.reverse)
+        except ValueError as e:
+            sys.exit(f"samdei-type: {e}")
+        for src, out in zip(texts, outs):
             print(f"{src}\t{out}" if a.tsv else out)
         return
     for src in texts:
         pieces = conv.pieces(src, chunk)
         lists = conv.nbest(pieces)
-        out = " ".join(hyps[0][0] if hyps else "" for hyps in lists)
+        out = drop_commas(" ".join(hyps[0][0] if hyps else "" for hyps in lists))
         print(f"{src}\t{out}" if a.tsv else out)
         for piece, hyps in zip(pieces, lists):
             if len(pieces) > 1:

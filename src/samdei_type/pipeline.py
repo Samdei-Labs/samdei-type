@@ -5,19 +5,21 @@
     conv.convert("knhom jong tov phsar")             # 'ខ្ញុំចង់ទៅផ្សារ'
 
 A released model folder holds the PyTorch weights (config.json, model.safetensors), the int8 ONNX graphs
-(onnx/), and rerank.json: the backend, beam size, piece length and rerank weights of the published scores, and
-the paths of the language models (lm/) and the channel model (channel/).
+(onnx/), and rerank.json: the backend, beam size, piece length and rerank weights of the published scores, the
+paths of the language models (lm/) and the channel model ("channel_model"; "channel_self": the model itself).
 
 The input is cut into pieces of at most 8 words, breaking after punctuation (evaluation.chunk_source). Each
 piece gets a beam search with k = 5, its n-best list is reranked (rerank.Reranker), and the best outputs of
-the pieces are joined with a space.
+the pieces are joined with a space. A comma not between digits becomes a space (text.drop_commas).
 """
 import importlib.util
 import json
 import warnings
 from pathlib import Path
 
-from .evaluation import chunk_source
+from .evaluation import chunk_khmer, chunk_source
+from .text import drop_commas, normalize_khmer
+from .vocab import REV_TAG
 
 RERANK_CONFIG = "rerank.json"
 _BACKENDS = ("auto", "torch", "onnx")
@@ -55,6 +57,8 @@ def _needed(cfg: dict, backend: str, rerank: bool) -> list[str]:
             if rel and any(weights.get(u) for u in uses):
                 rel = rel.rstrip("/")
                 files += [f"{rel}/{f}" for f in _TORCH_FILES] if key == "channel_model" else [rel]
+        if cfg.get("channel_self") and weights.get("channel"):  # the channel is the model's own torch weights
+            files += [f for f in _TORCH_FILES if f not in files]
     return files
 
 
@@ -152,8 +156,11 @@ class Converter:
                 paths[key] = str(p)
             else:
                 warnings.warn(f"{p} (named in {RERANK_CONFIG}) is missing; its rerank term is skipped")
+        channel = paths.get("channel_model")
+        if self.config.get("channel_self"):
+            channel = (self.model, self.sv, self.tv) if self.onnx is None else str(self.dir)
         rr = Reranker(self.config.get("rerank_weights", {}), paths.get("char_lm"), paths.get("word_lm"),
-                      paths.get("channel_model"), self.device)
+                      channel, self.device)
         return rr if rr.active else None
 
     def pieces(self, text: str, chunk: bool = True) -> list[str]:
@@ -173,15 +180,35 @@ class Converter:
             lists = [self.reranker.rerank(p, hyps) for p, hyps in zip(pieces, lists)]
         return lists
 
-    def convert_batch(self, texts: list[str], chunk: bool = True) -> list[str]:
+    def convert_batch(self, texts: list[str], chunk: bool = True, reverse: bool = False) -> list[str]:
         """Convert several messages. Their pieces are decoded together (batched on the torch backend)."""
-        per_text = [self.pieces(t, chunk) for t in texts]
-        best = [hyps[0][0] if hyps else "" for hyps in self.nbest([p for ps in per_text for p in ps])]
+        if reverse:
+            per_text = [self._khmer_pieces(t, chunk) for t in texts]
+            best = self._greedy([REV_TAG + p for ps in per_text for p in ps])
+        else:
+            per_text = [self.pieces(t, chunk) for t in texts]
+            best = [hyps[0][0] if hyps else "" for hyps in self.nbest([p for ps in per_text for p in ps])]
         out, i = [], 0
         for ps in per_text:
-            out.append(" ".join(best[i:i + len(ps)]))
+            joined = " ".join(best[i:i + len(ps)])
+            out.append(joined if reverse else drop_commas(joined))
             i += len(ps)
         return out
 
-    def convert(self, text: str, chunk: bool = True) -> str:
-        return self.convert_batch([text], chunk)[0]
+    def convert(self, text: str, chunk: bool = True, reverse: bool = False) -> str:
+        return self.convert_batch([text], chunk, reverse)[0]
+
+    def _khmer_pieces(self, text: str, chunk: bool) -> list[str]:
+        sv = self.sv if self.onnx is None else self.onnx.sv
+        if REV_TAG not in sv.stoi:
+            raise ValueError(f"{self.dir}: this model converts romanized Khmer to Khmer script only")
+        text = normalize_khmer(text)
+        if not text:
+            return []
+        return chunk_khmer(text, self.max_words) if chunk else [text]
+
+    def _greedy(self, pieces: list[str]) -> list[str]:
+        if self.onnx is not None:
+            return [self.onnx.beam(p, k=1)[0][0] for p in pieces]
+        from .evaluation import translate
+        return [hyps[0][0] for hyps in translate(self.model, self.sv, self.tv, pieces, beam=1)]

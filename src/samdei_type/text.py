@@ -16,3 +16,12 @@ def normalize_khmer(text: str) -> str:
         text = text.replace(ch, "")
     text = khnormal(text).translate(_ASCII_DIGITS)
     return re.sub(r"[ \t\u00a0\u3000]+", " ", text).strip()
+
+
+_COMMA = re.compile(r" *(?:(?<!\d),|,(?!\d)) *")
+
+
+def drop_commas(text: str) -> str:
+    """The output convention: Khmer marks a pause with a space, so a comma copied from the romanized input becomes
+    a space. A comma between two digits (5,000) stays."""
+    return re.sub(r" {2,}", " ", _COMMA.sub(" ", text)).strip(" ")
